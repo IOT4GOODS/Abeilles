@@ -1,4 +1,3 @@
-
 #include "HX711.h" //Library created by bogde
 #include "openscale.h" //Contains EPPROM locations for settings
 #include <Wire.h> //Needed to talk to on board TMP102 temp sensor
@@ -7,39 +6,31 @@
 #include <LowPower.h> //https://github.com/rocketscream/Low-Power
 #include <DallasTemperature.h>
 //15 ms, 30 ms, 60 ms, 120 ms, 250 ms, 500 ms, 1 s, 2 s, 4 s, 8 s, and forever
-
 #include <avr/sleep.h> //Needed for sleep_mode
 #include <avr/power.h> //Needed for powering down perihperals such as the ADC/TWI and Timers
-//#include <Akeru.h>
 
 #define ATSIGFOXTX "AT$SS="
-#define N 70 //nombre de mesure moyénné avant envoi.
-#define A -0.0553 // coefficient de correction
-#define B 10.063  // correction
-
-//#define SERIAL_DEBUG 1
+#define N 70 //Moyenne sur N valeurs entre deux envois
+//#define SERIAL_DEBUG 1 // permet d'afficher des messages de debug 
 #define ONE_WIRE_BUS 4
 
 const byte statusLED = 13;  //Flashes with each reading
-
 HX711 scale(DAT, CLK); //Setup interface to scale
-//OneWire remoteSensor(4);  //Setup reading one wire temp sensor on pin 4 (a 4.7K resistor is necessary)
-OneWire oneWire(ONE_WIRE_BUS);
-DallasTemperature sensors(&oneWire);
+OneWire oneWire(ONE_WIRE_BUS); // Setup interface for the DS18B20 temperature sensor
+DallasTemperature sensors(&oneWire);// Setup interface for the DS18B20 temperature sensor
 
-//byte remoteSensorAddress[8];
-//boolean remoteSensorAttached = true;
 boolean FirstRead = true; // permet d'envoyer un message sigfox au démarrage du programme
 
 unsigned int count = 0;
 float currentReading=0;
 float LocalTemperature=0;
-float scalesum=0;
-float tempsum=0;
-float RTempsum=0;
+float scalesum=0; // permet de faire l'accumulation du poids 
+float tempsum=0; // permet de faire l'accumulation de la temperature exterieure
+float RTempsum=0; // permet de faire l'accumulation de la temperature dans la ruche 
 char first=1;
 float scales ;
 float temp ;
+float rtemp ;
 float scale_comp;
 String LTemps_hex;
 String RTemps_hex;
@@ -53,13 +44,6 @@ float RemoteTemp;
 void setup()
 {
   pinMode(statusLED, OUTPUT);
-
-  //During testing reset everything
-  //for(int x = 0 ; x < 30 ; x++)
-  //{
-  //  EEPROM.write(x, 0xFF);
-  //}
-  
   Wire.begin();
   sensors.begin();
 
@@ -82,73 +66,37 @@ void setup()
   digitalWrite(AMP_EN, LOW); //Turn on power to HX711
   //Setup UART
   Serial.begin(9600);
-
-  #ifdef SERIAL_DEBUG
-    Serial.println(F("Test1"));
-  #endif
   scale.set_scale(11218); //Calibrate scale from EEPROM value
   scale.set_offset(84191); //Zero out the scale using a previously known zero point
-  #ifdef SERIAL_DEBUG
-    Serial.println(F("Test2"));
-  #endif
 }
 
 
 void loop()
 {
- if(count>N) 
- {
-  count=0;
-  scales = scalesum/N;
-  temp = tempsum/N;
-  scale_comp = scales + A*(B-temp)*(scales/10);
-   
-  poids_g_hex=uinttoHex((unsigned short)(scales*1000)); // temperature non compense en gramme
-  poids_comp_g_hex = uinttoHex((unsigned short)(scale_comp*1000));
-  sensors.requestTemperatures(); 
-  RemoteTemp=sensors.getTempCByIndex(0);
-  RTemps_hex = uinttoHex((short)(RemoteTemp*100));
-  LTemps_hex = uinttoHex((short)(temp*100));
-  msg = (String)ATSIGFOXTX + poids_g_hex + poids_comp_g_hex+ LTemps_hex + RTemps_hex; // Put everything together
-  
-  ATCommand = "";
-  ATCommand.concat(msg);
-  ATCommand.concat("\r\n");
-  //Serial.print((String)"\n>> " + ATCommand);
-  Serial.print(ATCommand); 
-  Serial.flush();
-  scalesum = 0;
-  tempsum =0;
-  RTempsum = 0;
- } 
- LowPower.idle(SLEEP_8S, ADC_OFF, TIMER2_OFF, TIMER1_OFF, TIMER0_OFF, 
-                SPI_OFF, USART0_OFF, TWI_OFF);
- scale.power_up();
- currentReading = scale.get_units(4);
- scalesum = scalesum + currentReading;
- scale.power_down();
- LocalTemperature = getLocalTemperature();
- tempsum = tempsum + LocalTemperature;
- sensors.requestTemperatures(); 
- RemoteTemp=sensors.getTempCByIndex(0);
- RTempsum = RTempsum + RemoteTemp;
+ // nouvelle mesure de poids de la ruche, temperature extérieure et temperature dans la ruche
+ scale.power_up(); // sortie de veille de la balance
+ currentReading = scale.get_units(4); //mesure du poids
+ scale.power_down(); // mise en veille de la balance
+ LocalTemperature = getLocalTemperature(); //mesure de la temperature exterieure
+ sensors.requestTemperatures();  // lance une nouvelle mesure de temperature dans la ruche
+ RemoteTemp=sensors.getTempCByIndex(0); // mesure de la temperature dans la ruche
+ // pour faire une moyenne sur N points de mesure, on fait l'accumulation des points de mesures
+ scalesum = scalesum + currentReading; // accumulation du poids
+ tempsum = tempsum + LocalTemperature; // accumulation de la temperature exterieure
+ RTempsum = RTempsum + RemoteTemp; // accumulation de la temperature dans la ruche 
  count++; 
  
- //RemoteTemp = getRemoteTemperature();
- if(FirstRead)
+ if(FirstRead) // pour la premiere lecture envoi d'un message sur le réseau Sigfox (test)
  {
-    FirstRead = false;
-    scales = currentReading;
-    temp = getLocalTemperature();
+    FirstRead = false; //     
     // correction de la mesure du poids en fonction de la temperature
-    scale_comp = scales + A*(B-temp)*(scales/10); 
-    poids_g_hex=uinttoHex((unsigned short)(scales*1000)); // temperature non compense en gramme
-    poids_comp_g_hex = uinttoHex((unsigned short)(scale_comp*1000));
-    sensors.requestTemperatures(); 
-    RemoteTemp=sensors.getTempCByIndex(0);
-    RTemps_hex = uinttoHex((short)(RemoteTemp*100));
+    scale_comp = scales + A*(B-temp)*(scales/10);  // a revoir...
+    //Pour l'envoi sur le réseau Sigfox il faut transformer les valeurs en chaine de carctere hexa
+    poids_g_hex=uinttoHex((unsigned short)(scales*1000)); // poids non corrige en gramme
+    poids_comp_g_hex = uinttoHex((unsigned short)(scale_comp*1000)); // poids corrige en gramme
+    RTemps_hex = uinttoHex((short)(RemoteTemp*100)); 
     LTemps_hex = uinttoHex((short)(temp*100));
-    
+    // concatenation de toutes les données mesurées pour envoi sur le réseau Sigfox.
     msg = (String)ATSIGFOXTX + poids_g_hex + poids_comp_g_hex+ LTemps_hex + RTemps_hex; // Put everything together
     ATCommand = "";
     ATCommand.concat(msg);
@@ -156,6 +104,36 @@ void loop()
     Serial.print(ATCommand); 
     Serial.flush();
  }
+ // lorsque nous faisons l'acquisition de N points, on fait la moyenne et envoi sur le réseau Sigfox
+ if(count>N) 
+ {
+  count=0;
+  // calcuk des moyennes sur N points
+  scales = scalesum/N;
+  temp = tempsum/N;
+  rtemp = RTempsum/N
+   // correction de la mesure du poids en fonction de la temperature
+  scale_comp = scales + A*(;B-temp)*(scales/10);
+  //Pour l'envoi sur le réseau Sigfox il faut transformer les valeurs en chaine de carctere hexa
+  poids_g_hex=uinttoHex((unsigned short)(scales*1000)); // temperature non compense en gramme
+  poids_comp_g_hex = uinttoHex((unsigned short)(scale_comp*1000));
+  RTemps_hex = uinttoHex((short)(RemoteTemp*100));
+  LTemps_hex = uinttoHex((short)(temp*100));
+  // concatenation de toutes les données mesurées pour envoi sur le réseau Sigfox.
+  msg = (String)ATSIGFOXTX + poids_g_hex + poids_comp_g_hex+ LTemps_hex + RTemps_hex; // Put everything together
+  ATCommand = "";
+  ATCommand.concat(msg);
+  ATCommand.concat("\r\n");
+  Serial.print(ATCommand); 
+  Serial.flush();
+  scalesum = 0;
+  tempsum =0;
+  RTempsum = 0;
+ } 
+ //mise en veille du µC pendant 8 secondes
+ LowPower.idle(SLEEP_8S, ADC_OFF, TIMER2_OFF, TIMER1_OFF, TIMER0_OFF, 
+                SPI_OFF, USART0_OFF, TWI_OFF);
+
  #ifdef SERIAL_DEBUG
     Serial.println(F("Readings: Poids="));
     Serial.print(currentReading, 2);
