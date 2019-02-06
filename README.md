@@ -8,5 +8,6 @@ Le hardware est basé sur les composants suivant :
  - Un chargeur de batterie Lipo (LiPo Rider Pro) : https://www.gotronic.fr/art-carte-lipo-rider-pro-106990008-19050.htm
  - Un panneau solaire 1W : https://www.gotronic.fr/art-cellule-solaire-sol1w-18993.htm
  - 2 jauges de contraintes de 50 Kg : https://www.gotronic.fr/art-capteur-de-force-50-kg-czl635-50-17601.htm
+ - une sonde de temperature etanche DS18B20 : https://www.gotronic.fr/art-sonde-etanche-ds18b20-19339.htm
 
 L'envoi des données est réalisé avec un modem Sigfox de Telecom Design 
